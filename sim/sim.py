@@ -6,19 +6,23 @@ import pickle as pkl
 from math import inf
 import numpy as np
 
+tqdm_copy = tqdm.tqdm # store it if you want to use it later
+
 def tqdm_replacement(iterable_object,*args,**kwargs):
     return iterable_object
 
-def sim(commands, silent=False, filename=None, sim_verify = False):
+def sim(commands, silent=False, filename=None, sim_verify = False, use_tqdm = True):
     
     # set up sim config
     # SimConfig.read_from_yaml('./config/all_feature.yaml')
     
     # NOTE: if you want to disable tqdm in the framework, you can use the following code
 
-    # if silent:
-    #     tqdm_copy = tqdm.tqdm # store it if you want to use it later
-    #     tqdm.tqdm = tqdm_replacement
+    if not silent: assert use_tqdm
+    if not use_tqdm:
+        tqdm.tqdm = tqdm_replacement
+    else:
+        tqdm.tqdm = tqdm_copy
 
     # create HW
     real_ch = SimConfig.ch
@@ -52,29 +56,29 @@ def sim(commands, silent=False, filename=None, sim_verify = False):
     issue_cmd = None
     issue_group = None
     # use tqdm to show progress
-    if silent:
-        iter_bar = range(total_cmd+1)
-    else:
-        iter_bar = tqdm.tqdm(range(total_cmd+1))
-    for _ in iter_bar:
+    for _ in tqdm.tqdm(range(total_cmd+1), leave=False, desc="Simulation"):
     # for _ in range(total_cmd+1):
     # while not queue.check_empty():
         if issue_cmd is not None: # skip the first cycle
         # 1. update states
-            if add_tick > 0:
-                global_tick += add_tick
-                # HW.update(add_tick)
-                np_bankstate += -int(add_tick)
-                np_bankstate.clip(0)
-                resource_state += -int(add_tick)
-                resource_state.clip(0)
-        # 2. issue command
+            # 检查bankstate是否溢出
+            if np.any(np_bankstate < 0):
+                raise ValueError("bankstate出现负值溢出，请增加延迟表示范围")
+
+            # if add_tick > 0:
+            #     global_tick += add_tick
+            #     # HW.update(add_tick)
+            #     np_bankstate += -int(add_tick)
+            #     np_bankstate.clip(0)
+            #     resource_state += -int(add_tick)
+            #     resource_state.clip(0)
+        # 2. issue command (覆盖指令涉及部分的 states)
             # queue
             queue.issue_inst(issue_group)
             queue.clear_empty_group(issue_group)
             # hardware
-            # if not silent: 
-            #     tqdm.tqdm.write(f"tick: {global_tick}, group: {issue_group}, cmd: {issue_cmd}")
+            if not silent: 
+                tqdm.tqdm.write(f"tick: {add_tick}, group: {issue_group}, cmd: {issue_cmd}")
             HW.issue_inst(issue_cmd, issue_group)
             # log
             issue_cmd = None
@@ -82,7 +86,7 @@ def sim(commands, silent=False, filename=None, sim_verify = False):
         add_tick = inf
         # 3. find next command to issue
         issuable_cmd = queue.get_inst()
-        # choose 1st cmd to issue, TODO: try different strategies
+        # choose 1 cmd to issue, TODO: try different strategies
         
         for tmp in issuable_cmd:
             group_id, inst_tmp = tmp
@@ -95,6 +99,7 @@ def sim(commands, silent=False, filename=None, sim_verify = False):
                 issue_group = group_id
     
     # TODO: how to get final latency?
+    #   把资源状态里的最大值加到全局时钟上
     global_tick += np.max(resource_state)
 
     SimConfig.ch = real_ch
