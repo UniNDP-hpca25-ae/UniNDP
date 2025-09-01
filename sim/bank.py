@@ -13,7 +13,7 @@ class Bank(Resource):
         self.co = SimConfig.co
         self.ro = SimConfig.ro
         self.co_w = SimConfig.co_w
-        self.data_pr = SimConfig.data_pr
+        # self.data_pr = SimConfig.data_pr
         self.verify = SimConfig.verify
         self.tRCDRD = SimConfig.tRCDRD
         self.tRCDWR = SimConfig.tRCDWR
@@ -36,7 +36,7 @@ class Bank(Resource):
         self.openrow = None
         self.nrow = self.ro
         self.ncol = self.co
-        self.ndata = self.co_w / self.data_pr
+        # self.ndata = self.co_w / self.data_pr
 
         # NOTE: timing
         # self.nxt_act = 0
@@ -44,11 +44,15 @@ class Bank(Resource):
         # self.nxt_read = 0
         # self.nxt_write = 0
         self.np_bankstate = bankstate[self.channel_id][self.rank_id][self.device_id][self.bank_id]
-
+        self.row_change_time = 0
+        # TODO: 记录换行的情况
+        
         if self.verify:
             self.data = []
 
+    # 何时能schedule对应的操作？
     def check_inst(self, target_row, write=False):
+        # 占用逻辑维护了最后一条指令的issue时间
         # if write:
         #     # write to bank
         #     if self.state == BankState.IDLE:
@@ -89,7 +93,7 @@ class Bank(Resource):
                     first_cmd_delay = self.np_bankstate[3]
                     follwing_cmd_delay = 0
                 else:
-                    raise Exception("write to bank, openrow != target_row")
+                    # raise Exception("write to bank, openrow != target_row")
                     first_cmd_delay = self.np_bankstate[1]
                     follwing_cmd_delay = self.tRP + self.tRCDWR
         else:
@@ -103,9 +107,10 @@ class Bank(Resource):
                     first_cmd_delay = self.np_bankstate[2]
                     follwing_cmd_delay = 0
                 else:
-                    # raise Exception("read from bank, openrow != target_row")
+                    # NOTE: 如果需要检测是否有换行问题，raise Exception("read from bank, openrow != target_row")
                     first_cmd_delay = self.np_bankstate[1]
                     follwing_cmd_delay = self.tRP + self.tRCDRD
+        # 返回可以 issue 第一条 read command 的时间
         return first_cmd_delay, follwing_cmd_delay
 
     # 发射指令
@@ -163,6 +168,7 @@ class Bank(Resource):
                             last_read_write + max(self.BL/2, self.tCCDL), \
                                 last_read_write + self.RL + self.BL/2 + self.tRTRS - self.WL], dtype=np.int64)
 
+    # # 根据操作，更新Bank的状态
     # def update(self, tick):
     #     self.nxt_act = max(self.nxt_act - tick,0)
     #     self.nxt_pre = max(self.nxt_pre - tick,0)

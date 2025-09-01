@@ -56,7 +56,8 @@ class Device:
             actual_pu_list = [ int ( i * self.physical_pu_num / pu_num ) for i in ultilized_pu]
             op1_src = [int( i * pu_connected_bk + op1_bank) for i in ultilized_pu]
             
-            if op1_bank == op2_bank: # compute using gb + bank
+            if op1_bank == op2_bank: # compute using buffer + bank
+                # 在op2的row空间划分本地的输入buffer和device的输入buffer，目前先按照row=0为本地的input buffer
                 if op2_row > 0: # compute using gb
                     assert SimConfig.de_gb > 0, "SimConfig.de_gb: %d" % SimConfig.de_gb
                     # sync_point: pu first compute, related to (pu, bank, gb, bus)
@@ -78,7 +79,7 @@ class Device:
                     bus_issue_time = sync_point
                     gb_issue_time = sync_point - SimConfig.de_gb_rl
                     issue_time = min(issue_time, gb_issue_time, bus_issue_time)
-                    self.last_cmd_info[inst_group] = sync_point - issue_time
+                    self.last_cmd_info[inst_group] = sync_point
                     return issue_time
                 else:
                     # NOTE: Bank-level NMP(UPMEM-like), pu read from self input buffer & related bank
@@ -94,7 +95,7 @@ class Device:
                     for i, pu_id in enumerate(actual_pu_list):
                         src_1_issue_time = sync_point - self.banks[op1_src[i]].check_inst(op1_row, write=False)[1] - SimConfig.RL
                         issue_time = min(issue_time, src_1_issue_time)
-                    self.last_cmd_info[inst_group] = sync_point - issue_time
+                    self.last_cmd_info[inst_group] = sync_point
                     return issue_time
 
             else: # compute using 2 banks
@@ -113,7 +114,7 @@ class Device:
                     src_1_issue_time = sync_point - self.banks[op1_src[i]].check_inst(op1_row, write=False)[1]
                     src_2_issue_time = sync_point - self.banks[op2_src[i]].check_inst(op2_row, write=False)[1]
                     issue_time = min(issue_time, pu_issue_time, src_1_issue_time, src_2_issue_time)
-                self.last_cmd_info[inst_group] = sync_point - issue_time
+                self.last_cmd_info[inst_group] = sync_point
                 return issue_time
             
         elif inst[1] in [OPTYPE.reg2buf, OPTYPE.buf2reg]: # happen inside PU
@@ -123,10 +124,12 @@ class Device:
             assert pu_num in SimConfig.de_pu, "pu_num: %d, SimConfig.de_pu: %d" % (pu_num, SimConfig.de_pu)
             ultilized_pu = [ i for i in range(pu_num) if pu_mask[i]]
             actual_pu_list = [ int ( i * self.physical_pu_num / pu_num ) for i in ultilized_pu]
+            # 同步点即为开始更换的时间，PU同步做更新
             sync_point = 0
             for i, pu_id in enumerate(actual_pu_list):
                 pu_sync_point = self.pu[pu_id].check_inst(inst[1])
                 sync_point = max(sync_point, pu_sync_point)
+            self.last_cmd_info[inst_group] = sync_point
             return sync_point
         
         elif inst[1] == OPTYPE.buf2bk:
@@ -142,7 +145,7 @@ class Device:
             op1_col = inst[6][2]
             is_input, buffer_addr, col_len = inst[7]
             auto_precharge = inst[8]
-            if not is_input: # 
+            if not is_input: # output无法指定col_len?
                 col_len = SimConfig.de_pu_bf / SimConfig.co_w
             else:
                 assert col_len * SimConfig.co_w <= SimConfig.de_pu_inbuf
@@ -165,7 +168,7 @@ class Device:
                 pu_issue_time = sync_point - SimConfig.de_pu_bf_rl
                 src_1_issue_time = sync_point - self.banks[op1_src[i]].check_inst(op1_row, write=True)[1] - SimConfig.WL
                 issue_time = min(issue_time, pu_issue_time, src_1_issue_time)
-            self.last_cmd_info[inst_group] = sync_point - issue_time
+            self.last_cmd_info[inst_group] = sync_point
             return issue_time
 
         elif inst[1] == OPTYPE.bk2buf:
@@ -182,8 +185,8 @@ class Device:
             auto_precharge = inst[8]
             if not is_input:
                 col_len = SimConfig.de_pu_bf / SimConfig.co_w
-            else:
-                assert col_len * SimConfig.co_w <= SimConfig.de_pu_inbuf
+            # else:
+            #     assert col_len * SimConfig.co_w <= SimConfig.de_pu_inbuf, f"col_len: {col_len}, SimConfig.co_w: {SimConfig.co_w}, SimConfig.de_pu_inbuf: {SimConfig.de_pu_inbuf}"
             # check
             assert pu_num in SimConfig.de_pu, "pu_num: %d, SimConfig.de_pu: %d" % (pu_num, SimConfig.de_pu)
             pu_connected_bk = self.ba_num/pu_num
@@ -203,7 +206,7 @@ class Device:
                 pu_issue_time = sync_point - SimConfig.de_pu_bf_wl
                 src_1_issue_time = sync_point - self.banks[op1_src[i]].check_inst(op1_row, write=False)[1] - SimConfig.RL
                 issue_time = min(issue_time, pu_issue_time, src_1_issue_time)
-            self.last_cmd_info[inst_group] = sync_point - issue_time
+            self.last_cmd_info[inst_group] = sync_point
             return issue_time
         
         elif inst[1] == OPTYPE.bk2gb:
@@ -223,7 +226,7 @@ class Device:
             bus_issue_time = sync_point
             gb_issue_time = sync_point - SimConfig.de_gb_wl
             issue_time = min(inf, bank_issue_time, gb_issue_time, bus_issue_time)
-            self.last_cmd_info[inst_group] = sync_point - issue_time
+            self.last_cmd_info[inst_group] = sync_point
             return issue_time
 
 
@@ -254,7 +257,7 @@ class Device:
             bus_issue_time = sync_point
             gb_issue_time = sync_point - SimConfig.de_gb_rl
             issue_time = min(bank_issue_time, gb_issue_time, bus_issue_time)
-            self.last_cmd_info[inst_group] = sync_point - issue_time
+            self.last_cmd_info[inst_group] = sync_point
             return issue_time
         
         else:
@@ -294,7 +297,7 @@ class Device:
                         self.pu[pu_id].set_state(pu_last_compute, pu_first_compute)
                     # NOTE: bus seams to be like pu, please check later
                     self.bus.set_state( pu_last_compute, pu_first_compute)
-                    #　
+                    #　考虑到需要让buffer持续到PU算完
                     self.buffer.set_state(sync_point - SimConfig.de_gb_rl + col_len * SimConfig.pu_lat, sync_point - SimConfig.de_gb_rl)
                 else:
                     assert SimConfig.de_pu_inbuf > 0
@@ -328,14 +331,18 @@ class Device:
             pu_num = inst[5][0]
             pu_mask = inst[5][1]
             buffer_addr = inst[6]
+            if len(inst) == 8:
+                end_point = inst[7]
+            else:
+                end_point = SimConfig.de_pu_bf_wl if inst[1] == OPTYPE.reg2buf else SimConfig.de_pu_bf_rl
             # check
             assert pu_num in SimConfig.de_pu, "pu_num: %d, SimConfig.de_pu: %d" % (pu_num, SimConfig.de_pu)
+            sync_point = self.last_cmd_info[inst_group]
             ultilized_pu = [ i for i in range(pu_num) if pu_mask[i]]
             actual_pu_list = [ int ( i * self.physical_pu_num / pu_num ) for i in ultilized_pu]
-            # 
-            end_point = SimConfig.de_pu_bf_wl if inst[1] == OPTYPE.reg2buf else SimConfig.de_pu_bf_rl
+            # 同步点即为开始更换的时间，PU同步做更新
             for i, pu_id in enumerate(actual_pu_list):
-                self.pu[pu_id].issue_inst(inst[1], buffer_addr, end_point, 0)
+                self.pu[pu_id].issue_inst(inst[1], buffer_addr, end_point + sync_point, sync_point)
 
         elif inst[1] == OPTYPE.buf2bk:
             # assume that the buffer replace all of its data
@@ -385,8 +392,8 @@ class Device:
             auto_precharge = inst[8]
             if not is_input:
                 col_len = SimConfig.de_pu_bf / SimConfig.co_w
-            else:
-                assert col_len * SimConfig.co_w <= SimConfig.de_pu_inbuf            
+            # else:
+            #     assert col_len * SimConfig.co_w <= SimConfig.de_pu_inbuf            
             # check
             pu_connected_bk = self.ba_num/pu_num
             ultilized_pu = [ i for i in range(pu_num) if pu_mask[i]]
@@ -461,12 +468,12 @@ class Device:
         # clear last_cmd_info
         self.last_cmd_info = {}
 
-    def update(self, tick):
-        if tick == 0:
-            return
-        # for bank in self.banks:
-        #     bank.update(tick)
-        for pu in self.pu:
-            pu.update(tick)
-        self.bus.update(tick)
-        self.buffer.update(tick)
+    # def update(self, tick):
+    #     if tick == 0:
+    #         return
+    #     # for bank in self.banks:
+    #     #     bank.update(tick)
+    #     for pu in self.pu:
+    #         pu.update(tick)
+    #     self.bus.update(tick)
+    #     self.buffer.update(tick)

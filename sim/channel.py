@@ -1,6 +1,6 @@
 from tools import *
 from sim.rank import *
-
+from multiprocessing import Pool
 class Channel:
     
     def __init__(self, channel_id, bankstate, resource_state):
@@ -15,21 +15,23 @@ class Channel:
             self.ranks.append(Rank(channel_id, rank_id, bankstate, resource_state[state_len_per_rank*rank_id:state_len_per_rank*(rank_id+1)]))
 
     def check_inst(self, inst, inst_group):
+        # 筛选Opcode，若与channel侧资源无关则下发给rank
         if inst[0] == LEVEL.CH:
             pass
         else:
             return self.ranks[inst[3]].check_inst(inst, inst_group)
         
     def issue_inst(self, inst, inst_group):
+        # 筛选Opcode，若与channel侧资源无关则下发给rank
         if inst[0] == LEVEL.CH:
             pass
         else:
             return self.ranks[inst[3]].issue_inst(inst, inst_group)
         
-    def update(self, tick):
-        # def update_rank(tick, rank):
-        #     rank.update(tick)
-        # _ = Parallel(n_jobs=SimConfig.ra)(delayed(update_rank)(tick, rank) for rank in self.ranks)
-        for rank in self.ranks:
-            rank.update(tick)
-        # print(f"update {tick}")
+    # def update(self, tick):
+    #     # def update_rank(tick, rank):
+    #     #     rank.update(tick)
+    #     # _ = Parallel(n_jobs=SimConfig.ra)(delayed(update_rank)(tick, rank) for rank in self.ranks)
+    #     for rank in self.ranks:
+    #         rank.update(tick)
+    #     # print(f"update {tick}")

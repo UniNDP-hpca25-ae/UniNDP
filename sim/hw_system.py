@@ -9,7 +9,7 @@ class HW_system:
         self.host = None
         self.channels = []
         self.channel_dqs = []
-        self.PCIe = None # 
+        self.PCIe = None # NOTE: 似乎较为高带宽，是否需要对占用sim的更细致一点
         self.last_cmd_info = {}
         # self.bankstate = bankstate
         # divide
@@ -21,7 +21,7 @@ class HW_system:
             self.channel_dqs.append(Resource(resource_state[0:SimConfig.ch], channel_id))
     
     def check_inst(self, inst, inst_group):
-        # 
+        # 筛选Opcode，若与HW_system侧资源无关则下发给channel
         if inst[0] == LEVEL.SYS:
             if inst[1] == OPTYPE.host_read:
                 # decode
@@ -56,7 +56,7 @@ class HW_system:
                         .devices[device_id].banks[bank_id]\
                             .check_inst(row_id, write=False)[1] - SimConfig.RL
                     issue_time = min(issue_time, bank_issue_time)
-                self.last_cmd_info[inst_group] = sync_point - issue_time
+                self.last_cmd_info[inst_group] = sync_point
                 return issue_time
             elif inst[1] == OPTYPE.host_write:
                 # decode
@@ -99,7 +99,7 @@ class HW_system:
                                                 .devices[device_id].banks[bank_id]\
                                                     .check_inst(row_id, write=True)[1] - SimConfig.WL)
                     issue_time = min(issue_time, bank_issue_time)
-                self.last_cmd_info[inst_group] = sync_point - issue_time
+                self.last_cmd_info[inst_group] = sync_point
                 return issue_time
             elif inst[1] == OPTYPE.host_write_device_buffer:
                 # decode
@@ -124,7 +124,7 @@ class HW_system:
                 sync_point = max(sync_point, self.channel_dqs[ch_id].check_state())
                 # find issue point
                 issue_time = sync_point
-                self.last_cmd_info[inst_group] = 0
+                self.last_cmd_info[inst_group] = sync_point
                 return issue_time
             elif inst[1] == OPTYPE.host_read_device_buffer:
                 pass
@@ -154,7 +154,7 @@ class HW_system:
                 sync_point = max(sync_point, self.channel_dqs[ch_id].check_state())
                 # find issue point
                 issue_time = sync_point
-                self.last_cmd_info[inst_group] = 0
+                self.last_cmd_info[inst_group] = sync_point
                 return issue_time
             elif inst[1] in [OPTYPE.host_read_mac_reg, OPTYPE.host_write_mac_reg]:
                 # decode
@@ -164,8 +164,11 @@ class HW_system:
                 pu_mask = inst[5]
                 device_list = [i for i in range(SimConfig.de) if device_mask[i]]
                 pu_list = [i for i in range(len(pu_mask)) if pu_mask[i]]
-                # check if the read can fit in 1 host read
-                assert SimConfig.co_w >= SimConfig.ba * SimConfig.bg * SimConfig.data_pr
+                
+                # TODO: 结果 Register的 Host Read 是否能把总线带宽用满？check if the read can fit in 1 host read
+                # 由于我们现在考虑的是比较大的结果 Buffer，可能暂时不会出现单个数据的读出
+                # assert SimConfig.co_w >= SimConfig.ba * SimConfig.bg * SimConfig.data_pr
+                
                 # find sync point
                 sync_point = 0
                 for device_id in device_list:
@@ -183,7 +186,7 @@ class HW_system:
                 sync_point = max(sync_point, self.channel_dqs[ch_id].check_state())
                 # find issue point
                 issue_time = sync_point
-                self.last_cmd_info[inst_group] = 0
+                self.last_cmd_info[inst_group] = sync_point
                 return issue_time
             elif inst[1] in [OPTYPE.host_read_rank_pu_reg, OPTYPE.host_write_rank_pu_reg]:
                 # decode
@@ -204,9 +207,10 @@ class HW_system:
                 sync_point = max(sync_point, self.channel_dqs[ch_id].check_state())
                 # find issue point
                 issue_time = sync_point
-                self.last_cmd_info[inst_group] = 0
+                self.last_cmd_info[inst_group] = sync_point
                 return issue_time
             # elif inst[1] == OPTYPE.host_write_mac_reg:
+            # temporary implement
             else:
                 raise Exception("unknown inst type")
         else:
@@ -281,7 +285,7 @@ class HW_system:
                 col_num = inst[6]
                 device_list = [i for i in range(SimConfig.de) if device_mask[i]]
                 # issue
-                sync_point = 0
+                sync_point = self.last_cmd_info[inst_group]
                 bus_start = sync_point
                 # bus_end = bus_start + (col_num - 1) * max(SimConfig.tCCDL, SimConfig.BL/2) + SimConfig.BL/2
                 bus_end = bus_start + (col_num - 1) * SimConfig.BL/2 + SimConfig.BL/2
@@ -311,7 +315,7 @@ class HW_system:
                 device_list = [i for i in range(SimConfig.de) if device_mask[i]]
                 pu_list = [i for i in range(len(pu_mask)) if pu_mask[i]]
                 # sync_point
-                sync_point = 0
+                sync_point = self.last_cmd_info[inst_group]
                 bus_start = sync_point
                 bus_end = bus_start + (col_num - 1) * SimConfig.BL/2 + SimConfig.BL/2
                 pu_start = sync_point + SimConfig.BL/2
@@ -334,7 +338,7 @@ class HW_system:
                 device_list = [i for i in range(SimConfig.de) if device_mask[i]]
                 pu_list = [i for i in range(len(pu_mask)) if pu_mask[i]]
                 # sync_point
-                sync_point = 0
+                sync_point = self.last_cmd_info[inst_group]
                 bus_start = sync_point
                 bus_end = bus_start + SimConfig.BL/2
                 pu_start = sync_point
@@ -359,7 +363,7 @@ class HW_system:
                 # pu_list = [i for i in range(len(pu_mask)) if pu_mask[i]]
                 # check if the read can fit in 1 host read
                 # sync_point
-                sync_point = 0
+                sync_point = self.last_cmd_info[inst_group]
                 bus_start = sync_point
                 bus_end = bus_start + SimConfig.BL/2
                 pu_start = sync_point
@@ -376,9 +380,9 @@ class HW_system:
             self.channels[channel_id].issue_inst(inst, inst_group)
             # return issue_lat
 
-    def update(self, tick):
-        # update all
-        for channel in self.channels:
-            channel.update(tick)
-        for channel_dq in self.channel_dqs:
-            channel_dq.update(tick)
+    # def update(self, tick):
+    #     # update all
+    #     for channel in self.channels:
+    #         channel.update(tick)
+    #     for channel_dq in self.channel_dqs:
+    #         channel_dq.update(tick)

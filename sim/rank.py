@@ -11,6 +11,7 @@ device buffer
 from tools import *
 from sim.device import *
 from math import inf
+# from joblib import Parallel, delayed
 
 class Rank:
 
@@ -22,7 +23,7 @@ class Rank:
         rank_resource_state = resource_state[:SimConfig.de+1+self.physical_pu_num]
         self.buffer = Buffer(SimConfig.ra_gb, rank_resource_state, SimConfig.de)
         self.last_cmd_info = {}
-        # self.mvm_unit = None 
+        # self.mvm_unit = None # 输入宽度由dram能给多少数决定，输出宽度由mvm_unit能存多少数决定，但是得把权重都存下来？
         self.pu = []
         rank_state_len = (resource_state.shape[0] - SimConfig.de - 1 - self.physical_pu_num) // SimConfig.de
 
@@ -55,6 +56,7 @@ class Rank:
                 actual_pu_list = [int(i * self.physical_pu_num / pu_num) for i in ultilized_pu]
                 op1_src_device = [int(i * pu_connected_device + op1_device) for i in ultilized_pu]
                 if op1_device == op2_device:
+                    # 在op2的row空间划分本地的输入buffer和device的输入buffer，目前先按照row=0为本地的input buffer
                     if op2_row_id > 0: # compute using gb
                         assert SimConfig.ra_gb > 0
                         pass
@@ -81,7 +83,7 @@ class Rank:
                             #                     .banks[op2_bank].check_inst(op2_row_id, write=False)[1] - SimConfig.RL
                             # issue_time = min(issue_time, src1_issue_time, src2_issue_time)
                             issue_time = min(issue_time, src1_issue_time)
-                        self.last_cmd_info[inst_group] = sync_point - issue_time
+                        self.last_cmd_info[inst_group] = sync_point
                         return issue_time
                 else:
                     op2_src_device = [int(i * pu_connected_device + op2_device) for i in ultilized_pu]
@@ -104,7 +106,7 @@ class Rank:
                         src2_issue_time = sync_point - self.devices[op2_src_device[i]]\
                                             .banks[op2_bank].check_inst(op2_row_id, write=False)[1] - SimConfig.RL
                         issue_time = min(issue_time, src1_issue_time, src2_issue_time)
-                    self.last_cmd_info[inst_group] = sync_point - issue_time
+                    self.last_cmd_info[inst_group] = sync_point
                     return issue_time
             # op-level, op-type, ch_id, ra_id, device_mask(并口写入), (bank, row_id, col_offset), col_num, auto_precharge
             elif inst[1] == OPTYPE.bk2gb:
@@ -139,7 +141,7 @@ class Rank:
                     bank_issue_time = sync_point - self.devices[device_id].banks[bank_id]\
                         .check_inst(row_id, write=False)[1] - SimConfig.RL
                     issue_time = min(issue_time, bank_issue_time)
-                self.last_cmd_info[inst_group] = sync_point - issue_time
+                self.last_cmd_info[inst_group] = sync_point
                 return issue_time
             elif inst[1] == OPTYPE.gb2bk:
                 # bank: bank read -> bank bus -> burst to device bus [bank, device_inter_bus]
@@ -176,7 +178,7 @@ class Rank:
                         issue_time = min(issue_time, sync_point - self.devices[device_id].banks[bank_id]\
                             .check_inst(row_id, write=True)[1] - SimConfig.WL)
                 issue_time = min(issue_time, sync_point - SimConfig.ra_gb_rl)
-                self.last_cmd_info[inst_group] = sync_point - issue_time
+                self.last_cmd_info[inst_group] = sync_point
                 return issue_time
 
         else:
@@ -196,6 +198,7 @@ class Rank:
                 actual_pu_list = [int(i * self.physical_pu_num / pu_num) for i in ultilized_pu]
                 op1_src_device = [int(i * pu_connected_device + op1_device) for i in ultilized_pu]
                 if op1_device == op2_device:
+                    # 假设不使用device间bus，而是device和pu的专属链接
                     sync_point = self.last_cmd_info[inst_group]
                     bank_first_read = sync_point - SimConfig.RL
                     bank_last_read = bank_first_read + (col_num - 1) * max(SimConfig.tCCDL, SimConfig.BL/2)
@@ -210,6 +213,7 @@ class Rank:
                         self.devices[op1_src_device[i]].bus.set_state(bus_end, bus_start)
                         self.pu[pu_id].set_state(pu_end, pu_start)
                 else: 
+                    # 假设不使用device间bus，而是device和pu的专属链接
                     op2_src_device = [int(i * pu_connected_device + op2_device) for i in ultilized_pu]
                     sync_point = self.last_cmd_info[inst_group]
                     bank_first_read = sync_point - SimConfig.RL
@@ -228,6 +232,7 @@ class Rank:
                         self.devices[op2_src_device[i]].bus.set_state(bus_end, bus_start)
                         self.pu[pu_id].set_state(pu_end, pu_start)
             # op-level, op-type, ch_id, ra_id, device_mask(并口写入), (bank, row_id, col_offset), col_num, auto_precharge
+            # NOTE: 先按照有转化来做
             elif inst[1] == OPTYPE.bk2gb:
                 # decode
                 device_mask = inst[4]
@@ -285,9 +290,9 @@ class Rank:
         else:
             return self.devices[inst[4]].issue_inst(inst, inst_group)
 
-    def update(self, tick):
-        for device in self.devices:
-            device.update(tick)
-        for device_bus in self.device_buses:
-            device_bus.update(tick)
-        self.buffer.update(tick)
+    # def update(self, tick):
+    #     for device in self.devices:
+    #         device.update(tick)
+    #     for device_bus in self.device_buses:
+    #         device_bus.update(tick)
+    #     self.buffer.update(tick)
